@@ -14,13 +14,13 @@
 class Simulation {
 
 	// properties:
-	std::vector<Particle *> electrons;
-	std::vector<Particle *> ions;
-	int gridSize;           // size of grid site
-	int** gridCharges;
+	//std::vector<Particle *> electrons;
+	//std::vector<Particle *> ions;
+	//int gridSize;           // size of grid site
+	//int** gridCharges;
 
 private:
-	std::vector<Particle *> initialize();
+	std::vector<Particle *> Simulation::initialize(bool isSource, double velocityRange);
 public:
 	Simulation(); // constructor
 	void simulate();

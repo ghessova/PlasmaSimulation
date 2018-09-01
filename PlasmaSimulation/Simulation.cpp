@@ -14,7 +14,7 @@
 
 // simulation parameters and constants
 const int grid = 100;
-const long int macroPartsCount = 10000;  // number of macro particles
+const long int macroPartsCount = 100000;  // number of macro particles
 const int steps = 10;					// number of simulation steps
 
 const double gridWidth = 1.5e-3;		// grid width (m) // or 1e-2
@@ -31,7 +31,7 @@ const double elMass = 9.1e-31;		// electron mass (kg)
 const double ionMass = 1.673e-27;   // ion mass (kg)
 
 const double PI = 3.141592653589793;
-double const dt = 1e-5;
+double const dt = 5e-12;
 
 // magnetic field
 const double theta = PI / 4;	// angle
@@ -42,7 +42,7 @@ int plateCrashCount;	// number of particles that crashed on the plates
 int gapCount;			// number of particles in the gap
 
 
-const double gap = 0.1 * gridWidth;				// gap width: -----------    ----------
+const double gap = 0.2 * gridWidth;				// gap width: -----------    ----------
 const double plateHeight = 0.3 * gridHeight;	// height of the plates surroundind the gap
 
 double elPotential[grid + 1][grid + 1];     // phi - electron potential field (nodes)
@@ -51,8 +51,14 @@ double iontPotential[grid + 1][grid + 1];   // rho - ion potential field
 double cellWidth = gridWidth / grid;
 double cellHeight = gridHeight / grid;
 
-int electronsCount;
-int ionsCount;
+const double T_e = 1e7; // electron temperature (Kelvins)
+const double T_i = 1e7; // ion temperature (Kelvins)
+
+const double  k_B = 1.38064852e-23;                        // m2 kg s-2 K-1 (Boltzman)
+double cMult = macroPartsCount / macroPartSize;
+const double  v_Te = sqrt((k_B * T_e) / (cMult * elMass));          // m s-1
+const double  v_Ti = sqrt((k_B * T_i) / (cMult * ionMass));
+
 
 // Constructor														
 Simulation::Simulation() {
@@ -115,7 +121,7 @@ std::vector<double> crossProduct(std::vector<double> a, std::vector<double> b) {
 * Generates macroparticles in the beginning of the simulation.
 * This method is called twice - once for electrons and then for ions.
 */
-std::vector<Particle *> Simulation::initialize() {
+std::vector<Particle *> Simulation::initialize(bool isSource, double velocityRange) {
 	std::vector<Particle *> particles; // vector of macro-particles (ions / electrons)
 	double rm = double(RAND_MAX); 
 	time_t t;
@@ -127,7 +133,12 @@ std::vector<Particle *> Simulation::initialize() {
 		 double y = rand() / rm;
 		 double *coordinates = (double *)malloc(2 * sizeof(double));
 		 coordinates[0] = x * gridWidth;
-		 coordinates[1] = plateHeight + y * (gridHeight - plateHeight); // the particles are not generated below the plate level
+		 if (isSource) {
+			 coordinates[1] = y * gridHeight;
+		 }
+		 else {
+			 coordinates[1] = plateHeight + y * (gridHeight - plateHeight); // the particles are not generated below the plate level
+		 }
 
 
 		 // velocity vector - auxiliary variables
@@ -152,23 +163,25 @@ std::vector<Particle *> Simulation::initialize() {
 		 // velocity vector 
 		 double *velocity = (double *)malloc(3 * sizeof(double));
 
-		 velocity[0] = sqrt(-2 * log(u1)) * cos(2 * PI * u2) * maxVelocity; // x
-		 velocity[1] = sqrt(-2 * log(u1)) * sin(2 * PI * u2) * maxVelocity; // y
-		 velocity[2] = sqrt(-2 * log(u3)) * cos(2 * PI * u4) * maxVelocity; // z
+		 velocity[0] = sqrt(-2 * log(u1)) * cos(2 * PI * u2) * velocityRange; // x
+		 velocity[1] = sqrt(-2 * log(u1)) * sin(2 * PI * u2) * velocityRange; // y
+		 velocity[2] = sqrt(-2 * log(u3)) * cos(2 * PI * u4) * velocityRange; // z
 
-		 //double *elForce = (double *)malloc(3 * sizeof(double));
 		 Particle *particle = createParticle(coordinates, velocity);
 		 particles.push_back(particle);
-		 //std::cout << particle->coords[0] << " " << particle->coords[1] << std::endl;
 
 	}
 	return particles;	
 }
 
+
 bool intersectsThePlate(double x, double y) {
 	return y <= plateHeight && (x <= gridWidth / 2 - gap / 2 || x >= gridWidth / 2 + gap / 2);
 }
 
+/*
+	Evaluates coordinates and velocities of the particles using Boris scheme.
+*/
 void boris(std::vector<Particle *> *particles, std::vector<double> *ex, std::vector<double> *ey, bool electrons) {
 	std::vector<double> B(3);  // magnetic field
 	B = fillVector(B0 * sin(theta), -B0 *cos(theta), 0);
@@ -224,7 +237,64 @@ void boris(std::vector<Particle *> *particles, std::vector<double> *ex, std::vec
 
 
 /*
+   Evaluates coordinates and velocities of the source particles.
+   No forces affect these particles, only the particles that reach the area borders are reflected.
+   No plates included.
+   Returns vector of reflected particles.
 */
+std::vector<Particle *> source(std::vector<Particle *> *particles) {
+	std::vector<Particle *> reflectedParticles;
+
+	for (int i = 0; i < particles->size(); i++) { // iteration through particles
+		Particle *particle = particles->at(i);
+		double x = particle->coords[0];
+		double y = particle->coords[1];
+
+		double vx = particle->velocity[0];
+		double vy = particle->velocity[1];
+
+		// without forces
+		x = x + dt * vx;
+		y = y + dt * vy;
+
+		bool isReflected = false;
+
+		// position is out of range -> the particle is reflected
+		if (x < 0) {
+			x = -x;
+			vx = -vx;
+			isReflected = true;
+		}
+		if (x > gridWidth) {
+			x = 2 * gridWidth - x;
+			vx = -vx;
+			isReflected = true;
+		}
+		if (y > gridHeight) {
+			y = 2 * gridHeight - y;
+			vy = -vy;
+			isReflected = true;
+		}
+		if (y < 0) {	// special case 
+			y = gridHeight - y;
+			isReflected = true;
+		}
+
+		particle->coords[0] = x;
+		particle->coords[1] = y;
+
+		particle->velocity[0] = vx;
+		particle->velocity[1] = vy;
+
+		if (isReflected) {
+			Particle *copy = createParticleCopy(particle);
+			reflectedParticles.push_back(copy);
+		}		
+
+		return reflectedParticles;
+	}
+}
+
 void countCoordsAndVelocity(std::vector<Particle *> *particles, std::vector<double> *ex, std::vector<double> *ey, bool electrons) {
 
 	boris(particles, ex, ey, electrons);
@@ -276,7 +346,6 @@ void countCoordsAndVelocity(std::vector<Particle *> *particles, std::vector<doub
 		particle->velocity[1] = vy;
 	}
 }
-
 
 
 
@@ -438,7 +507,6 @@ void interpolateElectricField(double e[grid + 1][grid + 1][2], std::vector<Parti
 		int cellX = getCellIndex(x, gridWidth, grid);
 		int cellY = getCellIndex(y, gridHeight, grid);
 
-		// todo check
 		ex->push_back(bilinearInterpolation(x, y, cellX * cellWidth, (cellX + 1) * cellWidth, cellY * cellHeight, (cellY + 1) * cellHeight, e[cellX][cellY][0], e[cellX][cellY + 1][0], e[cellX + 1][cellY][0], e[cellX + 1][cellY + 1][0]));
 		ey->push_back(bilinearInterpolation(x, y, cellX * cellWidth, (cellX + 1) * cellWidth, cellY * cellHeight, (cellY + 1) * cellHeight, e[cellX][cellY][1], e[cellX][cellY + 1][1], e[cellX + 1][cellY][1], e[cellX + 1][cellY + 1][1]));
 
@@ -533,26 +601,34 @@ void checkParticles2(std::vector<Particle *> *particles) {
 
 }
 
-
+/*
+	Adds reflected source particles to the vector of particles in the simulated area.
+*/
+void addParticles(std::vector<Particle *> *particles, std::vector<Particle *> *reflected) {
+	for (int i = 0; i < reflected->size(); i++) {
+		particles->push_back(reflected->at(i));
+	}
+}
 
 
 void Simulation::simulate() {
-	std::vector<Particle *> electrons = initialize();
-	std::vector<Particle *> ions = initialize();
 
-	//std::vector<Particle *> electrons = deterministicInitialize();
+	// particles in external source
+	std::vector<Particle *> sourceElectrons = initialize(true, v_Te);
+	std::vector<Particle *> sourceIons = initialize(true, v_Ti);
 
+	// particles in simulated area
+	std::vector<Particle *> electrons = initialize(false, v_Te);
+	std::vector<Particle *> ions = initialize(false, v_Ti);
+	
 
-	//printParticles(electrons, 0);
 	double rho[grid + 1][grid + 1];	// charge matrix
 	double phi[grid + 1][grid + 1]; // potential matrix
 	double elField[grid + 1][grid + 1][2]; // matrix of electric field vectors
 	initElField(elField);
 	std::vector<double> ex;
 	std::vector<double> ey;
-	//initVector(&ex, macroPartsCount);
-	//initVector(&ey, macroPartsCount);
-
+	
 	for (int t = 0; t < steps; t = t++ /*+ dt*/) { // time iteration
 
 		gapCount = 0;
@@ -571,12 +647,16 @@ void Simulation::simulate() {
 		ex.clear();
 		ey.clear();
 		interpolateElectricField(elField, &electrons, &ex, &ey);
-		countCoordsAndVelocity(&electrons, &ex, &ey, true);
+		boris(&electrons, &ex, &ey, true);
+
+		//countCoordsAndVelocity(&electrons, &ex, &ey, true);
 
 		ex.clear();
 		ey.clear();
 		interpolateElectricField(elField, &ions, &ex, &ey);
-		countCoordsAndVelocity(&ions, &ex, &ey, false);
+		boris(&ions, &ex, &ey, false);
+
+		//countCoordsAndVelocity(&ions, &ex, &ey, false);
 		
 		// 1. coordinates and velocity
 
@@ -584,10 +664,11 @@ void Simulation::simulate() {
 		checkParticles(&electrons);
 		checkParticles(&ions);
 
-		checkParticles2(&electrons);
-		checkParticles2(&ions);
-
-		
+		// add reflected particles from source to simulation
+		std::vector<Particle *> reflectedParticles = source(&sourceElectrons);
+		addParticles(&electrons, &reflectedParticles);
+		reflectedParticles = source(&sourceIons);
+		addParticles(&ions, &reflectedParticles);
 
 		// -----------------------------------------------------------------
 		
@@ -607,6 +688,8 @@ void Simulation::simulate() {
 	}
 	printParticles(electrons, "electrons.txt");
 	printParticles(ions, "ions.txt");
+	printParticles(sourceElectrons, "electronsSource.txt");
+	printParticles(sourceIons, "ionsSource.txt");
 	printMatrix(rho, "charge.txt");
 	printMatrix(phi, "potential.txt");
 	
