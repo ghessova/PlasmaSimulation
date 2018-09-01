@@ -13,6 +13,22 @@
 
 int main()
 {
+	/*std::vector<int> numbers;
+	for (int i = 0; i < 10; i++) {
+		numbers.push_back(i);
+	}
+	for (int i = 0; i < numbers.size(); i++) {
+		std::cout << numbers[i] << std::endl;
+	}
+	for (int i = 0; i < numbers.size(); i++) {
+		if (numbers[i] < 1 == 0) {
+			numbers.erase(numbers.begin() + i);
+		}
+	}
+	for (int i = 0; i < numbers.size(); i++) {
+		std::cout << numbers[i] << std::endl;
+	}*/
+	
 	std::cout << "Simulation started." << std::endl;
 	Simulation simulation;
 	clock_t start = clock();

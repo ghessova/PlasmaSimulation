@@ -15,7 +15,7 @@
 // simulation parameters and constants
 const int grid = 100;
 const long int macroPartsCount = 10000;  // number of macro particles
-const int steps = 100;					// number of simulation steps
+const int steps = 10;					// number of simulation steps
 
 const double gridWidth = 1.5e-3;		// grid width (m) // or 1e-2
 const double gridHeight = 1.5e-3;		// grid height (m)
@@ -33,6 +33,10 @@ const double ionMass = 1.673e-27;   // ion mass (kg)
 const double PI = 3.141592653589793;
 double const dt = 1e-5;
 
+// magnetic field
+const double theta = PI / 4;	// angle
+const double B0 = 1;			// size
+
 //int crashCount;
 int plateCrashCount;	// number of particles that crashed on the plates
 int gapCount;			// number of particles in the gap
@@ -46,6 +50,9 @@ double iontPotential[grid + 1][grid + 1];   // rho - ion potential field
 
 double cellWidth = gridWidth / grid;
 double cellHeight = gridHeight / grid;
+
+int electronsCount;
+int ionsCount;
 
 // Constructor														
 Simulation::Simulation() {
@@ -62,6 +69,46 @@ void init2DField(double field[grid + 1][grid + 1]) {
 	}
 
 }
+
+std::vector<double> operator+(std::vector<double> a, std::vector<double> b) {
+	std::vector<double> res(a.size());
+	for (unsigned int i = 0; i < a.size(); i++) {
+		res[i] = a[i] + b[i];
+	}
+	return res;
+}
+
+std::vector<double> operator*(double a, std::vector<double> b) {
+	std::vector<double> res(b.size());
+	for (unsigned int i = 0; i < b.size(); i++) {
+		res[i] = a*b[i];
+	}
+	return res;
+}
+
+
+/*
+Utility function for filling 3D vector.
+*/
+std::vector<double> fillVector(double a, double b, double c) {
+	std::vector<double> res(3);
+	res[0] = a;
+	res[1] = b;
+	res[2] = c;
+	return res;
+}
+
+std::vector<double> crossProduct(std::vector<double> a, std::vector<double> b) {
+	std::vector<double> result(3);
+	int j, k;
+	for (int i = 0; i < 3; i++) {
+		j = (i + 1) % 3;
+		k = (i + 2) % 3;
+		result[i] = a[j] * b[k] - a[k] * b[j];
+	}
+	return result;
+}
+
 
 
 /**
@@ -122,9 +169,68 @@ bool intersectsThePlate(double x, double y) {
 	return y <= plateHeight && (x <= gridWidth / 2 - gap / 2 || x >= gridWidth / 2 + gap / 2);
 }
 
-void countCoordsAndVelocity(std::vector<Particle *> particles) {
-	for (int i = 0; i < macroPartsCount; i++) { // iteration through particles
-		Particle *particle = particles.at(i);
+void boris(std::vector<Particle *> *particles, std::vector<double> *ex, std::vector<double> *ey, bool electrons) {
+	std::vector<double> B(3);  // magnetic field
+	B = fillVector(B0 * sin(theta), -B0 *cos(theta), 0);
+
+	std::vector<double> ef(3), vm(3), s(3), T(3), E, coords, v;
+
+	double m;   // mass
+	int charge; // +-1
+
+	if (electrons) {
+		m = elMass;
+		charge = -1;
+	}
+	else {
+		m = ionMass;
+		charge = 1;
+	}
+
+
+	for (int i = 0; i < particles->size(); i++) { // iteration through particles
+		Particle *particle = particles->at(i);
+		double x = particle->coords[0];
+		double y = particle->coords[1];
+
+		double vx = particle->velocity[0];
+		double vy = particle->velocity[1];
+		double vz = particle->velocity[2];
+
+		coords = fillVector(x, y, 0);
+		v = fillVector(vx, vy, vz);
+		E = fillVector(ex->at(i), ey->at(i), 0);
+
+
+		for (int j = 0; j < 3; j++) {
+			ef[j] = charge * q / m*dt / 2 * E[j];
+			T[j] = charge * q*B[j] * dt / m / 2;
+			s[j] = 2 * T[j] / (1 + T[j] * T[j]);
+		}
+
+		vm = v + ef;
+		v = vm + crossProduct(vm + crossProduct(vm, T), s) + ef;
+		coords = coords + dt * v;
+
+		particle->coords[0] = coords.at(0);
+		particle->coords[1] = coords.at(1);
+
+		particle->velocity[0] = v.at(0);
+		particle->velocity[1] = v.at(1);
+		particle->velocity[2] = v.at(2);
+
+	}
+}
+
+
+/*
+*/
+void countCoordsAndVelocity(std::vector<Particle *> *particles, std::vector<double> *ex, std::vector<double> *ey, bool electrons) {
+
+	boris(particles, ex, ey, electrons);
+
+	for (int i = 0; i < particles->size(); i++) { // iteration through particles
+		Particle *particle = particles->at(i);
 		double x = particle->coords[0];
 		double y = particle->coords[1];
 
@@ -132,8 +238,8 @@ void countCoordsAndVelocity(std::vector<Particle *> particles) {
 		double vy = particle->velocity[1];
 
 		// without forces
-		x = x + dt * vx;
-		y = y + dt * vy;
+		//x = x + dt * vx;
+		//y = y + dt * vy;
 
 		// position is out of range -> the particle is reflected
 		if (x < 0) {
@@ -170,6 +276,10 @@ void countCoordsAndVelocity(std::vector<Particle *> particles) {
 		particle->velocity[1] = vy;
 	}
 }
+
+
+
+
 
 void printParticles(std::vector<Particle *> v, const char* fileName) {
 	//typedef std::vector<Particle *>::iterator it_type;	
@@ -214,10 +324,10 @@ double getCellIndex(double position, double range, int cellsCount) {
 	rho - chargeField - output parameter
 	Q - charge
 */
-void countCharge(std::vector<Particle *> particles, double rho[grid + 1][grid + 1], double Q) {
+void countCharge(std::vector<Particle *> *particles, double rho[grid + 1][grid + 1], double Q) {
 	
-	for (int i = 0; i < macroPartsCount; i++) { // iteration through particles
-		Particle *particle = particles.at(i);
+	for (int i = 0; i < particles->size(); i++) { // iteration through particles
+		Particle *particle = particles->at(i);
 		double x = particle->coords[0];
 		double y =  particle->coords[1];
 
@@ -286,7 +396,7 @@ e - electric field - output parameter
 void countElectricField(double e[grid + 1][grid + 1][2], double phi[grid + 1][grid + 1]) {
 	for (int i = 1; i < grid; i++) {
 		for (int j = 1; j < grid; j++) {
-				e[i][j][0] = (phi[i][j - 1] - phi[i][j + 1]) / (2 * cellWidth);			// ex
+			e[i][j][0] = (phi[i][j - 1] - phi[i][j + 1]) / (2 * cellWidth);			// ex
 			e[i][j][1] = (phi[i - 1][j] - phi[i + 1][j]) / (2 * cellHeight);		// ey
 		}
 	}
@@ -306,17 +416,21 @@ void countElectricField(double e[grid + 1][grid + 1][2], double phi[grid + 1][gr
 	}
 }
 
-double billinearInterpolation(double x, double y, double x1, double x2, double y1, double y2, double fQ11, double fQ12, double fQ21, double fQ22) {
+double bilinearInterpolation(double x, double y, double x1, double x2, double y1, double y2, double fQ11, double fQ12, double fQ21, double fQ22) {
 	double fxy1 = (x2 - x) * fQ11 / (x2 - x1) + (x - x1) * fQ21 / (x2 - x1);
 	double fxy2 = (x2 - x) * fQ12 / (x2 - x1) + (x - x1) * fQ22 / (x2 - x1);
 	return (y2 - y) * fxy1 / (y2 - y1) + (y - y1) * fxy2 / (y2 - y1);
 }
 
-void interpolateElectricField(double e[grid + 1][grid + 1][2], std::vector<Particle *> particles, double *exArray, double *eyArray) {
-	double ex, ey;	
+/*
+ e - electric field in grid nodes
+ particles - ions or electrons
+ ex - 
+*/
+void interpolateElectricField(double e[grid + 1][grid + 1][2], std::vector<Particle *> *particles, std::vector<double> *ex, std::vector<double> *ey) {
 
-	for (int i = 0; i < macroPartsCount; i++) { // iteration through particles
-		Particle *particle = particles.at(i);
+	for (int i = 0; i < particles->size(); i++) { // iteration through particles
+		Particle *particle = particles->at(i);
 		double x = particle->coords[0];
 		double y = particle->coords[1];
 
@@ -324,8 +438,9 @@ void interpolateElectricField(double e[grid + 1][grid + 1][2], std::vector<Parti
 		int cellX = getCellIndex(x, gridWidth, grid);
 		int cellY = getCellIndex(y, gridHeight, grid);
 
-		exArray[i] = billinearInterpolation(x, y, cellX * cellWidth, (cellX + 1) * cellWidth, cellY * cellHeight, (cellY + 1) * cellHeight, e[cellX][cellY][0], e[cellX][cellY + 1][0], e[cellX + 1][cellY][0], e[cellX + 1][cellY + 1][0]);
-		eyArray[i] = billinearInterpolation(x, y, cellX * cellWidth, (cellX + 1) * cellWidth, cellY * cellHeight, (cellY + 1) * cellHeight, e[cellX][cellY][1], e[cellX][cellY + 1][1], e[cellX + 1][cellY][1], e[cellX + 1][cellY + 1][1]);
+		// todo check
+		ex->push_back(bilinearInterpolation(x, y, cellX * cellWidth, (cellX + 1) * cellWidth, cellY * cellHeight, (cellY + 1) * cellHeight, e[cellX][cellY][0], e[cellX][cellY + 1][0], e[cellX + 1][cellY][0], e[cellX + 1][cellY + 1][0]));
+		ey->push_back(bilinearInterpolation(x, y, cellX * cellWidth, (cellX + 1) * cellWidth, cellY * cellHeight, (cellY + 1) * cellHeight, e[cellX][cellY][1], e[cellX][cellY + 1][1], e[cellX + 1][cellY][1], e[cellX + 1][cellY + 1][1]));
 
 		//particle->ex = ex;
 		//particle->ey = ey;	
@@ -336,7 +451,87 @@ void interpolateElectricField(double e[grid + 1][grid + 1][2], std::vector<Parti
 }
 
 
+std::vector<Particle *> deterministicInitialize() {
+	std::vector<Particle *> particles; // vector of macro-particles (ions / electrons)
 
+	for (int i = 0; i < macroPartsCount; i++) {
+		double *coordinates = (double *)malloc(2 * sizeof(double));
+		coordinates[0] = gridWidth / 2;
+		coordinates[1] = gridHeight / 2;
+
+		double *velocity = (double *)malloc(3 * sizeof(double));
+		velocity[0] = 0;
+		velocity[1] = 0;
+		velocity[2] = 0;
+
+
+		Particle *particle = createParticle(coordinates, velocity);
+		particles.push_back(particle);
+	}
+	return particles;
+}
+
+void initElField(double elField[grid + 1][grid + 1][2]) {
+	for (int i = 0; i < grid + 1; i++) {
+		for (int j = 0; j < grid + 1; j++) {
+			elField[i][j][0] = 0;
+			elField[i][j][1] = 0;
+		}
+	}
+}
+
+void init1DArray(double eArray[macroPartsCount]) {
+	for (int i = 0; i < grid + 1; i++) {
+		eArray[i] = 0;
+	}
+}
+
+void initVector(std::vector<double> *vec, int count) {
+	for (int i = 0; i < count; i++) {
+		vec->push_back(0);
+	}
+}
+
+bool isOutOfTheBox(double x, double y) {
+	if (x < 0 || x > gridWidth || y < 0 || y > gridHeight) {
+		return true;
+	}
+	if (intersectsThePlate(x, y)) {
+		return true;
+	}
+	return false;	
+}
+
+void checkParticles(std::vector<Particle *> *particles) {
+	int count = 0;
+	for (int i = particles->size() - 1; i >= 0 ; i--) {
+		Particle *particle = particles->at(i);
+		double x = particle->coords[0];
+		double y = particle->coords[1];
+		if (isOutOfTheBox(x,y)) {
+			particles->erase(particles->begin() + i);
+			count++ ;
+		}
+	}
+	count = count;
+}
+
+void checkParticles2(std::vector<Particle *> *particles) {
+	for (int i = 0; i < particles->size(); i++) { // iteration through particles
+		Particle *particle = particles->at(i);
+		double x = particle->coords[0];
+		double y = particle->coords[1];
+
+		// indexes of node in the grid (node matrix) 
+		int cellX = getCellIndex(x, gridWidth, grid);
+		int cellY = getCellIndex(y, gridHeight, grid);
+
+		if (cellX < 0 || cellY < 0) {
+			x = x;
+		}
+	}
+
+}
 
 
 
@@ -345,38 +540,64 @@ void Simulation::simulate() {
 	std::vector<Particle *> electrons = initialize();
 	std::vector<Particle *> ions = initialize();
 
+	//std::vector<Particle *> electrons = deterministicInitialize();
+
+
 	//printParticles(electrons, 0);
 	double rho[grid + 1][grid + 1];	// charge matrix
 	double phi[grid + 1][grid + 1]; // potential matrix
 	double elField[grid + 1][grid + 1][2]; // matrix of electric field vectors
-	double exArray[macroPartsCount];
-	double eyArray[macroPartsCount];
+	initElField(elField);
+	std::vector<double> ex;
+	std::vector<double> ey;
+	//initVector(&ex, macroPartsCount);
+	//initVector(&ey, macroPartsCount);
 
 	for (int t = 0; t < steps; t = t++ /*+ dt*/) { // time iteration
 
 		gapCount = 0;
-		// 1. coordinates and velocity
-		countCoordsAndVelocity(ions);
-		
 
 		// 2. charge in grid nodes (both ions and electrons contribute)
 		init2DField(rho);
-		countCharge(ions, rho,  macroQ);
-		countCharge(electrons, rho, -macroQ);
+		
+		countCharge(&ions, rho,  macroQ);
+		countCharge(&electrons, rho, -macroQ);
 
 		// 3. potential in grid nodes (is obtained from charge)
 		init2DField(phi);
 		countPotential(rho, phi, 1000, t);
 		countElectricField(elField, phi);
-		interpolateElectricField(elField, electrons, exArray, eyArray);
-		//interpolateElectricField(elField, ions);
+		
+		ex.clear();
+		ey.clear();
+		interpolateElectricField(elField, &electrons, &ex, &ey);
+		countCoordsAndVelocity(&electrons, &ex, &ey, true);
 
+		ex.clear();
+		ey.clear();
+		interpolateElectricField(elField, &ions, &ex, &ey);
+		countCoordsAndVelocity(&ions, &ex, &ey, false);
+		
+		// 1. coordinates and velocity
+
+		// check which particles are out of the box
+		checkParticles(&electrons);
+		checkParticles(&ions);
+
+		checkParticles2(&electrons);
+		checkParticles2(&ions);
+
+		
+
+		// -----------------------------------------------------------------
+		
 		if (t == 0) {
 			printMatrix(phi, "potential0.txt");
 			printMatrix(rho, "charge0.txt");
 			printParticles(electrons, "electrons0.txt");
 		}
-		countCoordsAndVelocity(electrons);
+
+
 		if (t % 10 == 0) {
 			std::cout << "Step " << t << " completed." << std::endl;
 		}
