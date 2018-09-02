@@ -14,8 +14,8 @@
 
 // simulation parameters and constants
 const int grid = 100;
-const long int macroPartsCount = 100000;  // number of macro particles
-const int steps = 10;					// number of simulation steps
+const long int macroPartsCount = 10000;  // number of macro particles
+const int steps = 100;					// number of simulation steps
 
 const double gridWidth = 1.5e-3;		// grid width (m) // or 1e-2
 const double gridHeight = 1.5e-3;		// grid height (m)
@@ -31,7 +31,8 @@ const double elMass = 9.1e-31;		// electron mass (kg)
 const double ionMass = 1.673e-27;   // ion mass (kg)
 
 const double PI = 3.141592653589793;
-double const dt = 5e-12;
+
+
 
 // magnetic field
 const double theta = PI / 4;	// angle
@@ -59,6 +60,9 @@ double cMult = macroPartsCount / macroPartSize;
 const double  v_Te = sqrt((k_B * T_e) / (cMult * elMass));          // m s-1
 const double  v_Ti = sqrt((k_B * T_i) / (cMult * ionMass));
 
+//double const dt = 1e-12;
+// Half of maximum allowed time not to croos double cell (conditions are allright)
+double const dt = 2 * cellHeight / v_Te / 4;
 
 // Constructor														
 Simulation::Simulation() {
@@ -263,7 +267,7 @@ std::vector<Particle *> source(std::vector<Particle *> *particles) {
 		if (x < 0) {
 			x = -x;
 			vx = -vx;
-			isReflected = true;
+			isReflected = true;			
 		}
 		if (x > gridWidth) {
 			x = 2 * gridWidth - x;
@@ -291,8 +295,10 @@ std::vector<Particle *> source(std::vector<Particle *> *particles) {
 			reflectedParticles.push_back(copy);
 		}		
 
-		return reflectedParticles;
 	}
+	std::cout << reflectedParticles.size() << std::endl;
+	return reflectedParticles;
+
 }
 
 void countCoordsAndVelocity(std::vector<Particle *> *particles, std::vector<double> *ex, std::vector<double> *ey, bool electrons) {
@@ -380,6 +386,9 @@ void printMatrix (double phi[grid +1][grid+1], const char* fileName) {
 
 
 double getCellIndex(double position, double range, int cellsCount) {
+	if (position == range) { // the particle is on the border
+		return cellsCount - 1;
+	}
 	return position * cellsCount / range;
 }
 
@@ -578,6 +587,7 @@ void checkParticles(std::vector<Particle *> *particles) {
 		double y = particle->coords[1];
 		if (isOutOfTheBox(x,y)) {
 			particles->erase(particles->begin() + i);
+			//free(particle);
 			count++ ;
 		}
 	}
@@ -606,6 +616,9 @@ void checkParticles2(std::vector<Particle *> *particles) {
 */
 void addParticles(std::vector<Particle *> *particles, std::vector<Particle *> *reflected) {
 	for (int i = 0; i < reflected->size(); i++) {
+		if (particles->size() >= macroPartsCount) {
+			break;
+		}
 		particles->push_back(reflected->at(i));
 	}
 }
@@ -667,8 +680,15 @@ void Simulation::simulate() {
 		// add reflected particles from source to simulation
 		std::vector<Particle *> reflectedParticles = source(&sourceElectrons);
 		addParticles(&electrons, &reflectedParticles);
+		reflectedParticles.clear();
 		reflectedParticles = source(&sourceIons);
 		addParticles(&ions, &reflectedParticles);
+
+		std::cout << electrons.size() << std::endl;
+
+		if (ions.size() > macroPartsCount) {
+			getchar();
+		}
 
 		// -----------------------------------------------------------------
 		

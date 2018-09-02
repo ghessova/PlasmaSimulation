@@ -26,5 +26,12 @@ Particle *createParticleCopy(Particle *particle) {
 	return copy;
 }
 
+void freeParticle(Particle *particle) {
+	free(particle->velocity);
+	free(particle->coords);
+	//free(particle);
+	//particle = nullptr;
+}
+
 
 
