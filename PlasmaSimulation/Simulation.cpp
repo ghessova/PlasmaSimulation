@@ -14,8 +14,8 @@
 
 // simulation parameters and constants
 const int grid = 100;
-const long int macroPartsCount = 10000;  // number of macro particles
-const int steps = 100;					// number of simulation steps
+const long int macroPartsCount = 1000;  // number of macro particles
+const int steps = 10;					// number of simulation steps
 
 const double gridWidth = 1.5e-3;		// grid width (m) // or 1e-2
 const double gridHeight = 1.5e-3;		// grid height (m)
@@ -62,7 +62,7 @@ const double  v_Ti = sqrt((k_B * T_i) / (cMult * ionMass));
 
 //double const dt = 1e-12;
 // Half of maximum allowed time not to croos double cell (conditions are allright)
-double const dt = 2 * cellHeight / v_Te / 4;
+double const dt = 2 * cellHeight / v_Te / 100;
 
 // Constructor														
 Simulation::Simulation() {
@@ -296,63 +296,10 @@ std::vector<Particle *> source(std::vector<Particle *> *particles) {
 		}		
 
 	}
-	std::cout << reflectedParticles.size() << std::endl;
+	//std::cout << reflectedParticles.size() << std::endl;
 	return reflectedParticles;
 
 }
-
-void countCoordsAndVelocity(std::vector<Particle *> *particles, std::vector<double> *ex, std::vector<double> *ey, bool electrons) {
-
-	boris(particles, ex, ey, electrons);
-
-	for (int i = 0; i < particles->size(); i++) { // iteration through particles
-		Particle *particle = particles->at(i);
-		double x = particle->coords[0];
-		double y = particle->coords[1];
-
-		double vx = particle->velocity[0];
-		double vy = particle->velocity[1];
-
-		// without forces
-		//x = x + dt * vx;
-		//y = y + dt * vy;
-
-		// position is out of range -> the particle is reflected
-		if (x < 0) {
-			x = -x;
-			vx = -vx;
-		}
-		if (x > gridWidth) {
-			x = 2 * gridWidth - x;
-			vx = -vx;
-		}
-		if (y > gridHeight) {
-			y = 2 * gridHeight - y;
-			vy = -vy;
-		}
-		if (y < plateHeight) {	// special case - below the plate level
-			if (x > gridWidth / 2 - gap / 2 && x < gridWidth / 2 + gap / 2) { // particle is in the gap																			  
-				gapCount++;
-				if (y < 0) { // particle is in the bottom
-					x = rand() / RAND_MAX * gridWidth;
-					y = y + gridHeight - plateHeight; // new particle is generated on the opposite side
-				}
-
-			}
-			else { // particle is in on the plates
-				y = y + gridHeight - plateHeight; // new particle is generated on the opposite side
-				plateCrashCount++;
-			}
-		}
-
-		particle->coords[0] = x;
-		particle->coords[1] = y;
-
-		particle->velocity[0] = vx;
-		particle->velocity[1] = vy;
-	}
-}
-
 
 
 
@@ -506,7 +453,6 @@ double bilinearInterpolation(double x, double y, double x1, double x2, double y1
  ex - 
 */
 void interpolateElectricField(double e[grid + 1][grid + 1][2], std::vector<Particle *> *particles, std::vector<double> *ex, std::vector<double> *ey) {
-
 	for (int i = 0; i < particles->size(); i++) { // iteration through particles
 		Particle *particle = particles->at(i);
 		double x = particle->coords[0];
@@ -644,53 +590,44 @@ void Simulation::simulate() {
 	
 	for (int t = 0; t < steps; t = t++ /*+ dt*/) { // time iteration
 
-		gapCount = 0;
+		for (int i = 0; i < 10; i++) {
+			gapCount = 0;
 
-		// 2. charge in grid nodes (both ions and electrons contribute)
-		init2DField(rho);
+			// 2. charge in grid nodes (both ions and electrons contribute)
+			init2DField(rho);
+
+			countCharge(&ions, rho, macroQ);
+			countCharge(&electrons, rho, -macroQ);
+
+			// 3. potential in grid nodes (is obtained from charge)
+			init2DField(phi);
+			countPotential(rho, phi, 1000, t);
+			countElectricField(elField, phi);
+
+			ex.clear();
+			ey.clear();
+			interpolateElectricField(elField, &electrons, &ex, &ey);
+			boris(&electrons, &ex, &ey, true);	
+
+			// check which particles are out of the box
+			checkParticles(&ions);
+			// add reflected particles from source to simulation
 		
-		countCharge(&ions, rho,  macroQ);
-		countCharge(&electrons, rho, -macroQ);
+			addParticles(&ions, &source(&sourceIons));	
 
-		// 3. potential in grid nodes (is obtained from charge)
-		init2DField(phi);
-		countPotential(rho, phi, 1000, t);
-		countElectricField(elField, phi);
-		
-		ex.clear();
-		ey.clear();
-		interpolateElectricField(elField, &electrons, &ex, &ey);
-		boris(&electrons, &ex, &ey, true);
+			if (i == 9) {
+				ex.clear();
+				ey.clear();
+				interpolateElectricField(elField, &ions, &ex, &ey);
+				boris(&ions, &ex, &ey, false);
+				checkParticles(&electrons);
+				addParticles(&electrons, &source(&sourceElectrons));
 
-		//countCoordsAndVelocity(&electrons, &ex, &ey, true);
+			}
 
-		ex.clear();
-		ey.clear();
-		interpolateElectricField(elField, &ions, &ex, &ey);
-		boris(&ions, &ex, &ey, false);
-
-		//countCoordsAndVelocity(&ions, &ex, &ey, false);
-		
-		// 1. coordinates and velocity
-
-		// check which particles are out of the box
-		checkParticles(&electrons);
-		checkParticles(&ions);
-
-		// add reflected particles from source to simulation
-		std::vector<Particle *> reflectedParticles = source(&sourceElectrons);
-		addParticles(&electrons, &reflectedParticles);
-		reflectedParticles.clear();
-		reflectedParticles = source(&sourceIons);
-		addParticles(&ions, &reflectedParticles);
-
-		std::cout << electrons.size() << std::endl;
-
-		if (ions.size() > macroPartsCount) {
-			getchar();
 		}
-
-		// -----------------------------------------------------------------
+		
+		
 		
 		if (t == 0) {
 			printMatrix(phi, "potential0.txt");
@@ -699,11 +636,10 @@ void Simulation::simulate() {
 		}
 
 
-		if (t % 10 == 0) {
+		if (t % 5 == 0) {
 			std::cout << "Step " << t << " completed." << std::endl;
 		}
 
-		//std::cout << particles.at(0)->coords[0] << " " << particles.at(0)->coords[1] << std::endl;
 
 	}
 	printParticles(electrons, "electrons.txt");
@@ -715,8 +651,8 @@ void Simulation::simulate() {
 	
 
 
-	std::cout << plateCrashCount << std::endl;
-	std::cout << gapCount << std::endl;
+	//std::cout << plateCrashCount << std::endl;
+	//std::cout << gapCount << std::endl;
 
 
 }
