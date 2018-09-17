@@ -12,7 +12,7 @@
 // simulation parameters and constants
 const int grid = 100;
 const long int macroPartsCount = 1e5;  // number of macro particles
-const int steps = 2;					// number of simulation steps
+const int steps = 100;					// number of simulation steps
 
 const double gridWidth = 1e-2;		// grid width (m) // or 1e-2
 const double gridHeight = 1e-2;		// grid height (m)
@@ -151,7 +151,7 @@ std::vector<Particle *> Simulation::initialize(bool isSource, double velocityRan
 		 // velocity vector 
 		 double *velocity = (double *)malloc(3 * sizeof(double));
 
-		 do {
+		 //do {
 			 // velocity vector - auxiliary variables
 			 double u1 = (rand() / rm);
 			 double u2 = (rand() / rm);
@@ -171,11 +171,11 @@ std::vector<Particle *> Simulation::initialize(bool isSource, double velocityRan
 				 u4++;
 			 }
 
-			 velocity[0] = sqrt(-2 * log(u1)) * cos(2 * PI * u2) * velocityRange; // x
-			 velocity[1] = sqrt(-2 * log(u1)) * sin(2 * PI * u2) * velocityRange; // y
-			 velocity[2] = sqrt(-2 * log(u3)) * cos(2 * PI * u4) * velocityRange; // z
+			 velocity[0] = sqrt(-2 * log(u1)) * cos(2 * PI * u2) * (velocityRange/sqrt(3)); // x
+			 velocity[1] = sqrt(-2 * log(u1)) * sin(2 * PI * u2) * (velocityRange/sqrt(3)); // y
+			 velocity[2] = sqrt(-2 * log(u3)) * cos(2 * PI * u4) * (velocityRange/sqrt(3)); // z
 
-		 } while (getVectorSize(fillVector(velocity[0], velocity[1], velocity[2])) > velocityRange);
+		 //} while (getVectorSize(fillVector(velocity[0], velocity[1], velocity[2])) > velocityRange);
 
 		 Particle *particle = createParticle(coordinates, velocity);
 		 particles.push_back(particle);
@@ -228,9 +228,12 @@ void boris(std::vector<Particle *> *particles, std::vector<double> *ex, std::vec
 		for (int j = 0; j < 3; j++) {
 			ef[j] = charge * q / m*dt / 2 * E[j];
 			T[j] = charge * q*B[j] * dt / m / 2;
-			s[j] = 2 * T[j] / (1 + T[j] * T[j]);
 		}
+		double T_vel = getVectorSize(T);
 
+		for (int j = 0; j < 3; j++) {
+			s[j] = 2 * T[j] / (1 + T_vel * T_vel);
+		}
 		vm = v + ef;
 		v = vm + crossProduct(vm + crossProduct(vm, T), s) + ef;
 		coords = coords + dt * v;
@@ -255,7 +258,7 @@ void boris(std::vector<Particle *> *particles, std::vector<double> *ex, std::vec
 std::vector<Particle *> source(std::vector<Particle *> *particles, bool areElectrons) {
 	std::vector<Particle *> reflectedParticles;
 
-	double dtx = areElectrons ? dt*40 : dt;
+	double dtx = areElectrons ? dt*2 : dt;
 
 	for (int i = 0; i < particles->size(); i++) { // iteration through particles
 		Particle *particle = particles->at(i);
@@ -350,12 +353,6 @@ void printVector(std::vector<double> *numbers, const char *fileName) {
 	outputFile.close();
 }
 
-void printOneStupidValue(double phi[grid + 1][grid + 1], int i, int j) {
-	std::ofstream outputFile;
-	outputFile.open("potentialZone.txt", std::ios_base::app);
-	outputFile << phi[i][j] << std::endl;
-	outputFile.close();
-}
 
 void printFrequencies(std::map<double, int> *map, const char* fileName) {
 	std::ofstream outputFile;
@@ -689,6 +686,8 @@ void Simulation::simulate() {
 	std::vector<Particle *> outElectronsSource;
 	std::vector<Particle *> outIonsSimulation;
 	std::vector<Particle *> outElectronsSimulation;
+	std::vector<double> potentialVector;
+
 
 	for (int t = 0; t < steps; t = t++ /*+ dt*/) { // time iteration
 		plateCrashCount = 0;
@@ -715,7 +714,7 @@ void Simulation::simulate() {
 		// 3. potential in grid nodes (is obtained from charge)
 		init2DField(phi);
 		countPotential(rho, phi, 400, t);
-		printOneStupidValue(phi, 10, 25);
+		potentialVector.push_back(phi[10][25]);
 		countElectricField(elField, phi);
 
 		ex.clear();
@@ -750,9 +749,13 @@ void Simulation::simulate() {
 	printParticles(ions, "ions.txt");
 	printParticles(sourceElectrons, "electronsSource.txt");
 	printParticles(sourceIons, "ionsSource.txt");
+	
 	printMatrix(rho, "charge.txt");
 	printMatrix(phi, "potential.txt");
 	
+	printVector(&potentialVector, "potentialZone.txt");
+
+	velocityCheck(&sourceElectrons, "checksource.txt");
 	velocityCheck(&electrons, "elVelocities.txt");
 	velocityCheck (&ions, "ionVelocities.txt");
 
