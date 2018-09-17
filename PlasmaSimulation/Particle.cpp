@@ -20,9 +20,9 @@ Particle *createParticleCopy(Particle *particle) {
 	copy->coords[1] = particle->coords[1];
 
 	copy->velocity = (double *)malloc(3 * sizeof(double));
-	copy->velocity[0] = 0;
-	copy->velocity[1] = 0;
-	copy->velocity[2] = 0;
+	copy->velocity[0] = particle->velocity[0];
+	copy->velocity[1] = particle->velocity[1];
+	copy->velocity[2] = particle->velocity[2];
 	return copy;
 }
 
